@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Produit | Brikity</title>
+    <link rel="icon" type="image/png" href="assets/logo-brikity.png" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="components.js" type="module"></script>
+</head>
+<body>
+    <app-header></app-header>
+
+    <div class="container" id="pdp-root">
+        <p class="muted" style="padding: 3rem 0;">Chargement du produit…</p>
+    </div>
+
+    <app-footer></app-footer>
+
+    <script type="module">
+        import { loadProductById, formatPrice, badgeLabel, badgeClass } from "./catalog.js";
+        import { addToCart } from "./cart.js";
+        import { submitOrder } from "./checkout.js";
+
+        const params = new URLSearchParams(location.search);
+        const id = params.get("id");
+        const root = document.getElementById("pdp-root");
+        const product = await loadProductById(id);
+
+        if (!product) {
+            root.innerHTML = `<div class="empty-state"><p>Produit introuvable.</p><a class="btn btn-outline" href="collection.html">Retour collection</a></div>`;
+        } else {
+            document.title = `${product.name} | Brikity`;
+            const colors = Array.isArray(product.colors) ? product.colors : [];
+            let selectedColor = colors[0] || "";
+
+            root.innerHTML = `
+            <section class="pdp">
+                <div class="pdp-gallery">
+                    ${product.badge ? `<span class="${badgeClass(product.badge)}">${badgeLabel(product.badge)}</span>` : ""}
+                    <img src="${product.imageUrl || "assets/logo-brikity.png"}" alt="${product.name}" />
+                </div>
+                <div class="pdp-info">
+                    <p class="hero-kicker">${product.category || "Drop"} · Made in Tunisia</p>
+                    <h1>${product.name}</h1>
+                    <p class="product-price" style="font-size:1.35rem;">${formatPrice(product.price)}</p>
+                    <p class="muted">${product.description || ""}</p>
+                    ${colors.length ? `<p style="margin:1.25rem 0 0.35rem;font-weight:700;">Couleur</p><div class="swatches" id="swatches"></div>` : ""}
+                    <div class="qty-row">
+                        <label for="qty">Qté</label>
+                        <input type="number" id="qty" min="1" value="1" />
+                    </div>
+                    <div class="hero-actions">
+                        <button type="button" class="btn btn-primary" id="btn-add">Ajouter au panier</button>
+                        <button type="button" class="btn btn-outline" id="btn-quick">Commander vite</button>
+                    </div>
+                    <div id="quick-form" hidden style="margin-top:1.5rem;">
+                        <div class="form-panel">
+                            <h3 style="font-family:var(--font-display);margin-top:0;">Commande rapide</h3>
+                            <div class="form-field"><label>Nom</label><input id="q-nom" required /></div>
+                            <div class="form-field"><label>Téléphone</label><input id="q-tel" required placeholder="ex: 98 000 000" /></div>
+                            <div class="form-field"><label>Ville / adresse</label><input id="q-loc" /></div>
+                            <button type="button" class="btn btn-primary" id="q-submit" style="width:100%;">Confirmer sur WhatsApp</button>
+                            <div id="q-msg"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>`;
+
+            const swatches = document.getElementById("swatches");
+            if (swatches) {
+                colors.forEach((c, i) => {
+                    const b = document.createElement("button");
+                    b.type = "button";
+                    b.className = "color-swatch" + (i === 0 ? " is-selected" : "");
+                    b.style.background = c;
+                    b.title = c;
+                    b.addEventListener("click", () => {
+                        selectedColor = c;
+                        swatches.querySelectorAll(".color-swatch").forEach((el) => el.classList.remove("is-selected"));
+                        b.classList.add("is-selected");
+                    });
+                    swatches.appendChild(b);
+                });
+            }
+
+            document.getElementById("btn-add").addEventListener("click", () => {
+                const qty = Math.max(1, parseInt(document.getElementById("qty").value, 10) || 1);
+                addToCart({
+                    id: product.id,
+                    name: product.name,
+                    price: product.price,
+                    image: product.imageUrl,
+                    category: product.category,
+                    color: selectedColor,
+                    qty
+                });
+            });
+
+            document.getElementById("btn-quick").addEventListener("click", () => {
+                document.getElementById("quick-form").hidden = false;
+            });
+
+            document.getElementById("q-submit").addEventListener("click", async () => {
+                const msg = document.getElementById("q-msg");
+                const btn = document.getElementById("q-submit");
+                btn.disabled = true;
+                msg.innerHTML = "";
+                try {
+                    const qty = Math.max(1, parseInt(document.getElementById("qty").value, 10) || 1);
+                    const item = {
+                        id: product.id,
+                        name: product.name,
+                        price: product.price,
+                        image: product.imageUrl,
+                        category: product.category,
+                        color: selectedColor,
+                        qty
+                    };
+                    const { waUrl } = await submitOrder({
+                        nom: document.getElementById("q-nom").value,
+                        telephone: document.getElementById("q-tel").value,
+                        localisation: document.getElementById("q-loc").value,
+                        source: "quick_order",
+                        cartItems: [item],
+                        totalAmount: Number(product.price) * qty
+                    });
+                    window.open(waUrl, "_blank");
+                    msg.innerHTML = `<div class="alert alert-ok">Commande envoyée — WhatsApp s'ouvre.</div>`;
+                } catch (e) {
+                    msg.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+                } finally {
+                    btn.disabled = false;
+                }
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sur-mesure | Brikity</title>
+    <meta name="description" content="Crée ton cache-briquet Brikity personnalisé — nom, logo, couleurs. Made in Tunisia." />
+    <link rel="icon" type="image/png" href="assets/logo-brikity.png" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="components.js" type="module"></script>
+</head>
+<body>
+    <app-header></app-header>
+
+    <section class="page-hero">
+        <div class="container">
+            <h1>Crée ton Brikity</h1>
+            <p class="muted">Sur-mesure à la demande — on te confirme le design et le prix sur WhatsApp.</p>
+        </div>
+    </section>
+
+    <section class="section" style="padding-top: 0;">
+        <div class="container" style="display:grid;grid-template-columns:1.1fr 0.9fr;gap:1.5rem;align-items:start;">
+            <form class="form-panel" id="custom-form">
+                <div class="form-field">
+                    <label for="nom">Nom complet</label>
+                    <input id="nom" required />
+                </div>
+                <div class="form-field">
+                    <label for="tel">Téléphone</label>
+                    <input id="tel" required placeholder="ex: 98 000 000" />
+                </div>
+                <div class="form-field">
+                    <label for="loc">Ville / adresse</label>
+                    <input id="loc" required />
+                </div>
+                <div class="form-field">
+                    <label for="texte">Texte / nom sur le cache</label>
+                    <input id="texte" placeholder="ex: AMIN, BRK, crew name…" maxlength="40" />
+                </div>
+                <div class="form-field">
+                    <label for="couleurs">Couleurs souhaitées</label>
+                    <input id="couleurs" placeholder="ex: bleu médina + jaune safran" />
+                </div>
+                <div class="form-field">
+                    <label for="notes">Notes / logo / idées</label>
+                    <textarea id="notes" rows="4" placeholder="Décris ton style, envoie un lien logo plus tard sur WhatsApp…"></textarea>
+                </div>
+                <p class="muted" style="font-size:0.85rem;">À partir de ~25 DT selon complexité. Paiement à la livraison.</p>
+                <button type="submit" class="btn btn-primary" style="width:100%;" id="submit-btn">Commander du sur-mesure</button>
+                <div id="form-msg"></div>
+            </form>
+
+            <div class="custom-banner">
+                <h2>Comment ça marche ?</h2>
+                <p>1. Tu décris ton idée.<br />2. On valide ensemble sur WhatsApp.<br />3. Impression 3D à la demande en Tunisie.<br />4. Livraison + paiement à réception.</p>
+                <img src="assets/logo-brikity.png" alt="Brikity" style="width:min(240px,70%);margin:1.5rem auto 0;filter:drop-shadow(0 0 24px rgba(0,102,255,.4));" />
+            </div>
+        </div>
+    </section>
+
+    <app-footer></app-footer>
+
+    <script type="module">
+        import { submitOrder } from "./checkout.js";
+
+        const form = document.getElementById("custom-form");
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById("submit-btn");
+            const msg = document.getElementById("form-msg");
+            btn.disabled = true;
+            msg.innerHTML = "";
+            try {
+                const customDetails = {
+                    texte: document.getElementById("texte").value.trim(),
+                    couleurs: document.getElementById("couleurs").value.trim(),
+                    notes: document.getElementById("notes").value.trim()
+                };
+                const { waUrl } = await submitOrder({
+                    nom: document.getElementById("nom").value,
+                    telephone: document.getElementById("tel").value,
+                    localisation: document.getElementById("loc").value,
+                    message: customDetails.notes,
+                    source: "sur_mesure",
+                    customDetails,
+                    cartItems: [{
+                        id: "custom",
+                        name: "Brikity Sur-mesure",
+                        price: 25,
+                        qty: 1,
+                        color: customDetails.couleurs
+                    }],
+                    totalAmount: 25,
+                    deliveryCost: 0
+                });
+                window.open(waUrl, "_blank");
+                msg.innerHTML = `<div class="alert alert-ok">Demande envoyée — on te répond sur WhatsApp.</div>`;
+                form.reset();
+            } catch (err) {
+                msg.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+            } finally {
+                btn.disabled = false;
+            }
+        });
+    </script>
+
+    <style>
+        @media (max-width: 860px) {
+            .section .container { grid-template-columns: 1fr !important; }
+        }
+    </style>
+</body>
+</html>

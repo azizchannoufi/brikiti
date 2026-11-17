@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Catégories | Brikity Admin</title>
+    <link rel="icon" type="image/png" href="../assets/logo-brikity.png" />
+    <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+    <div id="shell"></div>
+    <main class="main">
+        <div class="topbar">
+            <button type="button" class="mobile-menu-btn" id="mobile-menu-btn">☰</button>
+            <h1>Catégories</h1>
+            <button type="button" class="btn btn-primary" id="btn-new">+ Ajouter</button>
+        </div>
+        <div class="content">
+            <div class="panel">
+                <div class="panel-header"><h2>Liste</h2></div>
+                <div id="table-wrap" class="empty">Chargement…</div>
+            </div>
+        </div>
+    </main>
+
+    <div class="modal-overlay" id="modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modal-title">Catégorie</h3>
+                <button type="button" class="btn btn-ghost" id="modal-close">✕</button>
+            </div>
+            <form class="modal-body" id="cat-form">
+                <input type="hidden" id="cat-id" />
+                <div class="form-group"><label>Titre</label><input class="form-control" id="title" required /></div>
+                <div class="form-group"><label>Ordre</label><input class="form-control" id="order" type="number" value="1" /></div>
+                <div id="form-msg"></div>
+            </form>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-ghost" id="modal-cancel">Annuler</button>
+                <button type="submit" form="cat-form" class="btn btn-primary">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import {
+            collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { requireAdmin, renderAdminShell, bindAdminChrome } from "./require-admin.js";
+        import { listCategories, upsertCategory, removeCategory } from "./local-db.js";
+
+        let db, demo = false, editingId = null;
+        const modal = document.getElementById("modal");
+        const openModal = () => modal.classList.add("open");
+        const closeModal = () => { modal.classList.remove("open"); editingId = null; document.getElementById("cat-form").reset(); };
+
+        requireAdmin(async ({ auth, db: database, demo: isDemo }) => {
+            demo = isDemo;
+            db = database;
+            document.getElementById("shell").innerHTML = renderAdminShell("categories", { demo });
+            bindAdminChrome(auth);
+            await refresh();
+        });
+
+        document.getElementById("btn-new").addEventListener("click", () => {
+            editingId = null;
+            document.getElementById("modal-title").textContent = "Nouvelle catégorie";
+            openModal();
+        });
+        document.getElementById("modal-close").addEventListener("click", closeModal);
+        document.getElementById("modal-cancel").addEventListener("click", closeModal);
+
+        async function refresh() {
+            let rows;
+            if (demo) {
+                rows = listCategories();
+            } else {
+                const snap = await getDocs(collection(db, "categories"));
+                rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+                    .sort((a, b) => (a.order || 0) - (b.order || 0));
+            }
+            const wrap = document.getElementById("table-wrap");
+            if (!rows.length) {
+                wrap.innerHTML = `<div class="empty">Aucune catégorie.</div>`;
+                return;
+            }
+            wrap.innerHTML = `
+            <table>
+                <thead><tr><th>Titre</th><th>Ordre</th><th></th></tr></thead>
+                <tbody>
+                ${rows.map((c) => `
+                    <tr>
+                        <td><strong>${esc(c.title || c.name)}</strong></td>
+                        <td>${c.order ?? 0}</td>
+                        <td class="actions">
+                            <button type="button" class="btn btn-ghost" data-edit="${c.id}">Éditer</button>
+                            <button type="button" class="btn btn-danger" data-del="${c.id}">Suppr.</button>
+                        </td>
+                    </tr>
+                `).join("")}
+                </tbody>
+            </table>`;
+
+            wrap.querySelectorAll("[data-edit]").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const c = rows.find((x) => x.id === btn.dataset.edit);
+                    if (!c) return;
+                    editingId = c.id;
+                    document.getElementById("modal-title").textContent = "Modifier";
+                    document.getElementById("title").value = c.title || c.name || "";
+                    document.getElementById("order").value = c.order ?? 0;
+                    openModal();
+                });
+            });
+
+            wrap.querySelectorAll("[data-del]").forEach((btn) => {
+                btn.addEventListener("click", async () => {
+                    if (!confirm("Supprimer ?")) return;
+                    if (demo) removeCategory(btn.dataset.del);
+                    else await deleteDoc(doc(db, "categories", btn.dataset.del));
+                    await refresh();
+                });
+            });
+        }
+
+        document.getElementById("cat-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const msg = document.getElementById("form-msg");
+            msg.innerHTML = "";
+            try {
+                const payload = {
+                    title: document.getElementById("title").value.trim(),
+                    order: Number(document.getElementById("order").value) || 0
+                };
+                if (demo) {
+                    upsertCategory(payload, editingId || null);
+                } else if (editingId) {
+                    await updateDoc(doc(db, "categories", editingId), { ...payload, updatedAt: serverTimestamp() });
+                } else {
+                    await addDoc(collection(db, "categories"), { ...payload, createdAt: serverTimestamp() });
+                }
+                closeModal();
+                await refresh();
+            } catch (err) {
+                msg.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+            }
+        });
+
+        function esc(s) {
+            return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+        }
+    </script>
+</body>
+</html>

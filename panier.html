@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Panier | Brikity</title>
+    <link rel="icon" type="image/png" href="assets/logo-brikity.png" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="components.js" type="module"></script>
+</head>
+<body>
+    <app-header></app-header>
+
+    <section class="page-hero">
+        <div class="container">
+            <h1>Ton panier</h1>
+            <p class="muted">Paiement à la livraison partout en Tunisie.</p>
+        </div>
+    </section>
+
+    <div class="container cart-layout" id="cart-root"></div>
+
+    <app-footer></app-footer>
+
+    <script type="module">
+        import { getCart, updateQty, removeFromCart, getCartTotal } from "./cart.js";
+        import { loadDeliverySettings, computeDeliveryCost, submitOrder } from "./checkout.js";
+        import { formatPrice } from "./catalog.js";
+
+        const root = document.getElementById("cart-root");
+        const delivery = await loadDeliverySettings();
+
+        function render() {
+            const cart = getCart();
+            if (!cart.length) {
+                root.innerHTML = `
+                <div class="empty-state" style="grid-column:1/-1;">
+                    <p>Ton panier est vide.</p>
+                    <a class="btn btn-primary" href="collection.html">Voir le drop</a>
+                </div>`;
+                return;
+            }
+
+            const subtotal = getCartTotal();
+            const ship = computeDeliveryCost(subtotal, delivery);
+            const total = subtotal + ship;
+
+            root.innerHTML = `
+            <div class="cart-lines">
+                ${cart.map((item) => `
+                    <div class="cart-line" data-id="${item.id}" data-color="${item.color || ""}">
+                        <img src="${item.image || "assets/logo-brikity.png"}" alt="" />
+                        <div>
+                            <strong>${item.name}</strong>
+                            ${item.color ? `<div class="muted" style="font-size:0.85rem;">Couleur: ${item.color}</div>` : ""}
+                            <div class="product-price">${formatPrice(item.price)}</div>
+                        </div>
+                        <div class="cart-line-actions">
+                            <input type="number" min="1" value="${item.qty}" data-qty style="width:64px;text-align:center;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.35rem;" />
+                            <button type="button" data-remove>Retirer</button>
+                        </div>
+                    </div>
+                `).join("")}
+            </div>
+            <div>
+                <div class="cart-summary" style="margin-bottom:1rem;">
+                    <div class="summary-row"><span>Sous-total</span><span>${formatPrice(subtotal)}</span></div>
+                    <div class="summary-row"><span>Livraison</span><span>${ship === 0 ? "Offerte" : formatPrice(ship)}</span></div>
+                    ${!delivery.isFree && delivery.freeThreshold ? `<p class="muted" style="font-size:0.85rem;">Livraison offerte dès ${delivery.freeThreshold} DT</p>` : ""}
+                    <div class="summary-row total"><span>Total</span><span>${formatPrice(total)}</span></div>
+                </div>
+                <form class="form-panel" id="checkout-form">
+                    <h3 style="font-family:var(--font-display);margin-top:0;">Checkout</h3>
+                    <div class="form-field"><label for="nom">Nom complet</label><input id="nom" name="nom" required /></div>
+                    <div class="form-field"><label for="tel">Téléphone</label><input id="tel" name="tel" required placeholder="ex: 98 000 000" /></div>
+                    <div class="form-field"><label for="loc">Ville / adresse</label><input id="loc" name="loc" required /></div>
+                    <div class="form-field"><label for="msg">Note (optionnel)</label><textarea id="msg" name="msg" rows="3"></textarea></div>
+                    <p class="muted" style="font-size:0.85rem;">Tu seras redirigé vers WhatsApp pour confirmer. Paiement à la livraison.</p>
+                    <button type="submit" class="btn btn-primary" style="width:100%;" id="submit-btn">Commander via WhatsApp</button>
+                    <div id="form-msg"></div>
+                </form>
+            </div>`;
+
+            root.querySelectorAll("[data-qty]").forEach((input) => {
+                input.addEventListener("change", () => {
+                    const line = input.closest(".cart-line");
+                    updateQty(line.dataset.id, parseInt(input.value, 10) || 1, line.dataset.color || "");
+                    render();
+                });
+            });
+
+            root.querySelectorAll("[data-remove]").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const line = btn.closest(".cart-line");
+                    removeFromCart(line.dataset.id, line.dataset.color || "");
+                    render();
+                });
+            });
+
+            document.getElementById("checkout-form").addEventListener("submit", async (e) => {
+                e.preventDefault();
+                const btn = document.getElementById("submit-btn");
+                const msg = document.getElementById("form-msg");
+                btn.disabled = true;
+                msg.innerHTML = "";
+                try {
+                    const { waUrl } = await submitOrder({
+                        nom: document.getElementById("nom").value,
+                        telephone: document.getElementById("tel").value,
+                        localisation: document.getElementById("loc").value,
+                        message: document.getElementById("msg").value,
+                        source: "panier",
+                        deliveryCost: ship,
+                        totalAmount: total
+                    });
+                    window.location.href = waUrl;
+                } catch (err) {
+                    msg.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+                    btn.disabled = false;
+                }
+            });
+        }
+
+        window.addEventListener("cart:updated", () => render());
+        render();
+    </script>
+</body>
+</html>

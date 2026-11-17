@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard | Brikity Admin</title>
+    <link rel="icon" type="image/png" href="../assets/logo-brikity.png" />
+    <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+    <div id="shell"></div>
+    <main class="main">
+        <div class="topbar">
+            <button type="button" class="mobile-menu-btn" id="mobile-menu-btn">☰</button>
+            <h1>Dashboard</h1>
+            <span id="admin-email" style="color:var(--muted);font-size:.85rem;"></span>
+        </div>
+        <div class="content">
+            <div id="demo-banner" class="alert alert-ok" hidden style="margin-bottom:1rem;">
+                Mode démo local — données dans le navigateur (pas Firebase).
+            </div>
+            <div class="stats">
+                <div class="stat-card"><span>Produits</span><strong id="kpi-products">—</strong></div>
+                <div class="stat-card"><span>Commandes en attente</span><strong id="kpi-pending">—</strong></div>
+                <div class="stat-card"><span>Commandes totales</span><strong id="kpi-orders">—</strong></div>
+            </div>
+            <div class="panel">
+                <div class="panel-header"><h2>Commandes récentes</h2><a class="btn btn-ghost" href="orders.html">Tout voir</a></div>
+                <div id="recent" class="empty">Chargement…</div>
+            </div>
+        </div>
+    </main>
+
+    <script type="module">
+        import { collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { requireAdmin, renderAdminShell, bindAdminChrome } from "./require-admin.js";
+        import { listProducts, listOrders } from "./local-db.js";
+
+        requireAdmin(async ({ user, auth, db, demo }) => {
+            document.getElementById("shell").innerHTML = renderAdminShell("index", { demo });
+            bindAdminChrome(auth);
+            document.getElementById("admin-email").textContent = user.email || "";
+            if (demo) document.getElementById("demo-banner").hidden = false;
+
+            let productsCount = 0;
+            let orders = [];
+
+            if (demo) {
+                productsCount = listProducts().length;
+                orders = listOrders();
+            } else {
+                const [productsSnap, ordersSnap] = await Promise.all([
+                    getDocs(collection(db, "products")),
+                    getDocs(query(collection(db, "orders"), orderBy("createdAt", "desc"), limit(50)))
+                ]);
+                productsCount = productsSnap.size;
+                orders = ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            }
+
+            const pending = orders.filter((o) => o.status === "en_attente").length;
+            document.getElementById("kpi-products").textContent = productsCount;
+            document.getElementById("kpi-orders").textContent = orders.length;
+            document.getElementById("kpi-pending").textContent = pending;
+
+            const recent = orders.slice(0, 8);
+            if (!recent.length) {
+                document.getElementById("recent").innerHTML = `<div class="empty">Aucune commande pour l'instant.</div>`;
+                return;
+            }
+
+            document.getElementById("recent").innerHTML = `
+            <table>
+                <thead><tr><th>Client</th><th>Total</th><th>Source</th><th>Statut</th></tr></thead>
+                <tbody>
+                ${recent.map((o) => `
+                    <tr>
+                        <td><strong>${esc(o.nom)}</strong><div style="color:var(--muted);font-size:.8rem">${esc(o.telephone || "")}</div></td>
+                        <td>${Number(o.totalAmount || 0).toFixed(2)} DT</td>
+                        <td>${esc(o.source || "—")}</td>
+                        <td><span class="badge ${statusClass(o.status)}">${esc(o.status || "—")}</span></td>
+                    </tr>
+                `).join("")}
+                </tbody>
+            </table>`;
+        });
+
+        function statusClass(s) {
+            if (s === "en_attente") return "badge-warn";
+            if (s === "livree") return "badge-ok";
+            if (s === "expediee" || s === "confirmee") return "badge-hot";
+            return "badge-muted";
+        }
+
+        function esc(str) {
+            return String(str ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Collection | Brikity</title>
+    <meta name="description" content="Toute la collection Brikity — cache-briquets 3D streetwear Made in Tunisia." />
+    <link rel="icon" type="image/png" href="assets/logo-brikity.png" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="components.js" type="module"></script>
+</head>
+<body>
+    <app-header></app-header>
+
+    <section class="page-hero">
+        <div class="container">
+            <h1>Collection</h1>
+            <p class="muted">Le drop complet — filtre par vibe et trouve ton grip.</p>
+            <div class="filters">
+                <input type="search" id="search" placeholder="Rechercher…" aria-label="Rechercher" />
+                <select id="category" aria-label="Catégorie">
+                    <option value="">Toutes les catégories</option>
+                </select>
+                <select id="badge" aria-label="Badge">
+                    <option value="">Tous</option>
+                    <option value="nouveau">Nouveau</option>
+                    <option value="bestseller">Best-seller</option>
+                </select>
+            </div>
+        </div>
+    </section>
+
+    <section class="section" style="padding-top: 0;">
+        <div class="container">
+            <div class="product-grid" id="catalog-grid">
+                <p class="muted">Chargement…</p>
+            </div>
+        </div>
+    </section>
+
+    <app-footer></app-footer>
+
+    <script type="module">
+        import { loadProducts, loadCategories, renderProductCard, bindAddButtons } from "./catalog.js";
+
+        const grid = document.getElementById("catalog-grid");
+        const searchEl = document.getElementById("search");
+        const catEl = document.getElementById("category");
+        const badgeEl = document.getElementById("badge");
+
+        const [products, categories] = await Promise.all([loadProducts(), loadCategories()]);
+
+        categories.forEach((c) => {
+            const opt = document.createElement("option");
+            opt.value = c.id || c.title;
+            opt.textContent = c.title || c.name || c.id;
+            catEl.appendChild(opt);
+        });
+
+        function render() {
+            const q = (searchEl.value || "").trim().toLowerCase();
+            const cat = catEl.value;
+            const badge = badgeEl.value;
+            const filtered = products.filter((p) => {
+                if (cat && p.category !== cat && p.category !== catEl.selectedOptions[0]?.textContent) return false;
+                if (badge && p.badge !== badge) return false;
+                if (q && !`${p.name} ${p.description || ""}`.toLowerCase().includes(q)) return false;
+                return true;
+            });
+            if (!filtered.length) {
+                grid.innerHTML = `<div class="empty-state">Aucun produit pour ces filtres.</div>`;
+                return;
+            }
+            grid.innerHTML = filtered.map(renderProductCard).join("");
+            bindAddButtons(grid, filtered);
+        }
+
+        searchEl.addEventListener("input", render);
+        catEl.addEventListener("change", render);
+        badgeEl.addEventListener("change", render);
+        render();
+    </script>
+</body>
+</html>

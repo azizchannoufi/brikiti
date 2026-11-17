@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Réglages | Brikity Admin</title>
+    <link rel="icon" type="image/png" href="../assets/logo-brikity.png" />
+    <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+    <div id="shell"></div>
+    <main class="main">
+        <div class="topbar">
+            <button type="button" class="mobile-menu-btn" id="mobile-menu-btn">☰</button>
+            <h1>Réglages</h1>
+        </div>
+        <div class="content" style="display:grid;gap:1.25rem;">
+            <form class="panel" id="form-delivery" style="padding:1.2rem;">
+                <h2 style="font-family:var(--display);font-size:1.05rem;margin:0 0 1rem;">Livraison</h2>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Livraison gratuite ?</label>
+                        <select class="form-control" id="isFree">
+                            <option value="false">Non</option>
+                            <option value="true">Oui</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Prix livraison (DT)</label>
+                        <input class="form-control" id="deliveryPrice" type="number" step="0.01" value="7" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Seuil livraison offerte (DT)</label>
+                    <input class="form-control" id="freeThreshold" type="number" value="80" />
+                </div>
+                <button type="submit" class="btn btn-primary">Enregistrer livraison</button>
+                <div id="msg-delivery"></div>
+            </form>
+
+            <form class="panel" id="form-whatsapp" style="padding:1.2rem;">
+                <h2 style="font-family:var(--display);font-size:1.05rem;margin:0 0 1rem;">WhatsApp</h2>
+                <div class="form-group">
+                    <label>Numéro (avec indicatif, ex: 21698123456)</label>
+                    <input class="form-control" id="waPhone" placeholder="21698123456" />
+                </div>
+                <button type="submit" class="btn btn-primary">Enregistrer WhatsApp</button>
+                <div id="msg-wa"></div>
+            </form>
+
+            <form class="panel" id="form-telegram" style="padding:1.2rem;">
+                <h2 style="font-family:var(--display);font-size:1.05rem;margin:0 0 1rem;">Telegram</h2>
+                <p style="color:var(--muted);font-size:.85rem;margin-top:0;">En mode démo, le test utilise le token saisi ici (navigateur).</p>
+                <div class="form-group">
+                    <label>Activé</label>
+                    <select class="form-control" id="tgEnabled">
+                        <option value="false">Non</option>
+                        <option value="true">Oui</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>Bot token</label><input class="form-control" id="tgToken" /></div>
+                <div class="form-group"><label>Chat ID</label><input class="form-control" id="tgChat" /></div>
+                <div class="actions">
+                    <button type="submit" class="btn btn-primary">Enregistrer Telegram</button>
+                    <button type="button" class="btn btn-blue" id="btn-tg-test">Tester</button>
+                </div>
+                <div id="msg-tg"></div>
+            </form>
+
+            <form class="panel" id="form-banner" style="padding:1.2rem;">
+                <h2 style="font-family:var(--display);font-size:1.05rem;margin:0 0 1rem;">Bannière (optionnel)</h2>
+                <div class="form-group">
+                    <label>Active</label>
+                    <select class="form-control" id="bannerActive">
+                        <option value="false">Non</option>
+                        <option value="true">Oui</option>
+                    </select>
+                </div>
+                <div class="form-group"><label>Texte</label><input class="form-control" id="bannerText" /></div>
+                <button type="submit" class="btn btn-primary">Enregistrer bannière</button>
+                <div id="msg-banner"></div>
+            </form>
+        </div>
+    </main>
+
+    <script type="module">
+        import { doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { requireAdmin, renderAdminShell, bindAdminChrome } from "./require-admin.js";
+        import { sendTelegramMessage } from "../telegram-notify.js";
+        import { getSettings, saveSetting } from "./local-db.js";
+
+        let db, demo = false;
+
+        requireAdmin(async ({ auth, db: database, demo: isDemo }) => {
+            demo = isDemo;
+            db = database;
+            document.getElementById("shell").innerHTML = renderAdminShell("settings", { demo });
+            bindAdminChrome(auth);
+            await loadAll();
+        });
+
+        async function loadAll() {
+            if (demo) {
+                const s = getSettings();
+                applyDelivery(s.delivery || {});
+                document.getElementById("waPhone").value = s.whatsapp?.phone || "";
+                applyTg(s.telegram || {});
+                applyBanner(s.banner || {});
+                return;
+            }
+
+            const [delivery, wa, tg, banner] = await Promise.all([
+                getDoc(doc(db, "settings", "delivery")),
+                getDoc(doc(db, "settings", "whatsapp")),
+                getDoc(doc(db, "settings", "telegram")),
+                getDoc(doc(db, "settings", "banner"))
+            ]);
+
+            if (delivery.exists()) applyDelivery(delivery.data());
+            if (wa.exists()) document.getElementById("waPhone").value = wa.data().phone || "";
+            if (tg.exists()) applyTg(tg.data());
+            if (banner.exists()) applyBanner(banner.data());
+        }
+
+        function applyDelivery(d) {
+            document.getElementById("isFree").value = d.isFree ? "true" : "false";
+            document.getElementById("deliveryPrice").value = d.price ?? 7;
+            document.getElementById("freeThreshold").value = d.freeThreshold ?? 80;
+        }
+        function applyTg(t) {
+            document.getElementById("tgEnabled").value = t.enabled ? "true" : "false";
+            document.getElementById("tgToken").value = t.botToken || "";
+            document.getElementById("tgChat").value = t.chatId || "";
+        }
+        function applyBanner(b) {
+            document.getElementById("bannerActive").value = b.isActive ? "true" : "false";
+            document.getElementById("bannerText").value = b.text || "";
+        }
+
+        function flash(el, ok, text) {
+            el.innerHTML = `<div class="alert ${ok ? "alert-ok" : "alert-error"}">${text}</div>`;
+        }
+
+        document.getElementById("form-delivery").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            try {
+                const payload = {
+                    isFree: document.getElementById("isFree").value === "true",
+                    price: Number(document.getElementById("deliveryPrice").value) || 0,
+                    freeThreshold: Number(document.getElementById("freeThreshold").value) || 0
+                };
+                if (demo) saveSetting("delivery", payload);
+                else await setDoc(doc(db, "settings", "delivery"), { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+                flash(document.getElementById("msg-delivery"), true, "Livraison enregistrée.");
+            } catch (err) {
+                flash(document.getElementById("msg-delivery"), false, err.message);
+            }
+        });
+
+        document.getElementById("form-whatsapp").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            try {
+                const phone = document.getElementById("waPhone").value.replace(/\D/g, "");
+                if (demo) saveSetting("whatsapp", { phone });
+                else await setDoc(doc(db, "settings", "whatsapp"), { phone, updatedAt: serverTimestamp() }, { merge: true });
+                flash(document.getElementById("msg-wa"), true, "WhatsApp enregistré.");
+            } catch (err) {
+                flash(document.getElementById("msg-wa"), false, err.message);
+            }
+        });
+
+        document.getElementById("form-telegram").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            try {
+                const payload = {
+                    enabled: document.getElementById("tgEnabled").value === "true",
+                    botToken: document.getElementById("tgToken").value.trim(),
+                    chatId: document.getElementById("tgChat").value.trim()
+                };
+                if (demo) saveSetting("telegram", payload);
+                else await setDoc(doc(db, "settings", "telegram"), { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+                flash(document.getElementById("msg-tg"), true, "Telegram enregistré.");
+            } catch (err) {
+                flash(document.getElementById("msg-tg"), false, err.message);
+            }
+        });
+
+        document.getElementById("btn-tg-test").addEventListener("click", async () => {
+            const res = await sendTelegramMessage(
+                document.getElementById("tgToken").value,
+                document.getElementById("tgChat").value,
+                "🔥 Test Brikity Admin — Telegram OK"
+            );
+            flash(document.getElementById("msg-tg"), res.ok, res.ok ? "Message envoyé." : (res.error || "Échec"));
+        });
+
+        document.getElementById("form-banner").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            try {
+                const payload = {
+                    isActive: document.getElementById("bannerActive").value === "true",
+                    text: document.getElementById("bannerText").value.trim()
+                };
+                if (demo) saveSetting("banner", payload);
+                else await setDoc(doc(db, "settings", "banner"), { ...payload, updatedAt: serverTimestamp() }, { merge: true });
+                flash(document.getElementById("msg-banner"), true, "Bannière enregistrée.");
+            } catch (err) {
+                flash(document.getElementById("msg-banner"), false, err.message);
+            }
+        });
+    </script>
+</body>
+</html>

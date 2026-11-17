@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function stringMax(field, maxLen) {
+      return field is string && field.size() <= maxLen;
+    }
+
+    match /admins/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    function orderCreateValid() {
+      let d = request.resource.data;
+      return d.keys().hasAll(['nom', 'telephone', 'status', 'createdAt'])
+        && stringMax(d.nom, 100) && d.nom.size() >= 2
+        && stringMax(d.telephone, 30) && d.telephone.size() >= 8
+        && d.status == 'en_attente'
+        && (!('localisation' in d) || stringMax(d.localisation, 300))
+        && (!('message' in d) || stringMax(d.message, 1000))
+        && (!('produit' in d) || stringMax(d.produit, 4000))
+        && (!('quantite' in d) || (d.quantite is number && d.quantite > 0 && d.quantite <= 100))
+        && (!('totalAmount' in d) || (d.totalAmount is number && d.totalAmount >= 0 && d.totalAmount <= 100000))
+        && (!('deliveryCost' in d) || (d.deliveryCost is number && d.deliveryCost >= 0 && d.deliveryCost <= 1000))
+        && (!('source' in d) || stringMax(d.source, 40))
+        && (!('cartItems' in d) || (d.cartItems is list && d.cartItems.size() <= 50));
+    }
+
+    match /orders/{orderId} {
+      allow create: if orderCreateValid();
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /settings/telegram {
+      allow read, write: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

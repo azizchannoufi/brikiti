@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Commandes | Brikity Admin</title>
+    <link rel="icon" type="image/png" href="../assets/logo-brikity.png" />
+    <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+    <div id="shell"></div>
+    <main class="main">
+        <div class="topbar">
+            <button type="button" class="mobile-menu-btn" id="mobile-menu-btn">☰</button>
+            <h1>Commandes</h1>
+            <select id="filter-status" class="form-control" style="width:auto;min-width:160px;">
+                <option value="">Tous les statuts</option>
+                <option value="en_attente">En attente</option>
+                <option value="confirmee">Confirmée</option>
+                <option value="expediee">Expédiée</option>
+                <option value="livree">Livrée</option>
+            </select>
+        </div>
+        <div class="content">
+            <div class="panel">
+                <div class="panel-header"><h2>Liste</h2></div>
+                <div id="table-wrap" class="empty">Chargement…</div>
+            </div>
+        </div>
+    </main>
+
+    <div class="modal-overlay" id="modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Détail commande</h3>
+                <button type="button" class="btn btn-ghost" id="modal-close">✕</button>
+            </div>
+            <div class="modal-body" id="order-detail"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-ghost" id="modal-close-2">Fermer</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import {
+            collection, getDocs, updateDoc, deleteDoc, doc, query, orderBy, getDoc
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { requireAdmin, renderAdminShell, bindAdminChrome } from "./require-admin.js";
+        import { listOrders, upsertOrderStatus, removeOrder, getSettings } from "./local-db.js";
+
+        let db, demo = false, orders = [], waPhone = "";
+
+        requireAdmin(async ({ auth, db: database, demo: isDemo }) => {
+            demo = isDemo;
+            db = database;
+            document.getElementById("shell").innerHTML = renderAdminShell("orders", { demo });
+            bindAdminChrome(auth);
+
+            if (demo) {
+                waPhone = String(getSettings().whatsapp?.phone || "").replace(/\D/g, "");
+            } else {
+                try {
+                    const snap = await getDoc(doc(db, "settings", "whatsapp"));
+                    waPhone = String(snap.data()?.phone || "").replace(/\D/g, "");
+                } catch { /* */ }
+            }
+
+            await refresh();
+        });
+
+        document.getElementById("filter-status").addEventListener("change", () => renderTable());
+
+        const modal = document.getElementById("modal");
+        document.getElementById("modal-close").addEventListener("click", () => modal.classList.remove("open"));
+        document.getElementById("modal-close-2").addEventListener("click", () => modal.classList.remove("open"));
+
+        async function refresh() {
+            if (demo) {
+                orders = listOrders();
+            } else {
+                const snap = await getDocs(query(collection(db, "orders"), orderBy("createdAt", "desc")));
+                orders = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            }
+            renderTable();
+        }
+
+        function renderTable() {
+            const filter = document.getElementById("filter-status").value;
+            const rows = filter ? orders.filter((o) => o.status === filter) : orders;
+            const wrap = document.getElementById("table-wrap");
+            if (!rows.length) {
+                wrap.innerHTML = `<div class="empty">Aucune commande.</div>`;
+                return;
+            }
+            wrap.innerHTML = `
+            <table>
+                <thead><tr><th>Client</th><th>Total</th><th>Source</th><th>Statut</th><th></th></tr></thead>
+                <tbody>
+                ${rows.map((o) => `
+                    <tr>
+                        <td>
+                            <strong>${esc(o.nom)}</strong>
+                            <div style="color:var(--muted);font-size:.8rem">${esc(o.telephone)}</div>
+                        </td>
+                        <td>${Number(o.totalAmount || 0).toFixed(2)} DT</td>
+                        <td>${esc(o.source || "—")}</td>
+                        <td>
+                            <select class="form-control" data-status="${o.id}" style="min-width:130px;">
+                                ${["en_attente","confirmee","expediee","livree"].map((s) =>
+                                    `<option value="${s}" ${o.status === s ? "selected" : ""}>${s}</option>`
+                                ).join("")}
+                            </select>
+                        </td>
+                        <td class="actions">
+                            <button type="button" class="btn btn-ghost" data-view="${o.id}">Voir</button>
+                            <a class="btn btn-blue" href="${waLink(o)}" target="_blank" rel="noopener">WA</a>
+                            <button type="button" class="btn btn-danger" data-del="${o.id}">Suppr.</button>
+                        </td>
+                    </tr>
+                `).join("")}
+                </tbody>
+            </table>`;
+
+            wrap.querySelectorAll("[data-status]").forEach((sel) => {
+                sel.addEventListener("change", async () => {
+                    if (demo) upsertOrderStatus(sel.dataset.status, sel.value);
+                    else await updateDoc(doc(db, "orders", sel.dataset.status), { status: sel.value });
+                    const o = orders.find((x) => x.id === sel.dataset.status);
+                    if (o) o.status = sel.value;
+                });
+            });
+
+            wrap.querySelectorAll("[data-view]").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const o = orders.find((x) => x.id === btn.dataset.view);
+                    if (!o) return;
+                    document.getElementById("order-detail").innerHTML = `
+                        <p><strong>Client:</strong> ${esc(o.nom)} — ${esc(o.telephone)}</p>
+                        <p><strong>Adresse:</strong> ${esc(o.localisation || "—")}</p>
+                        <p><strong>Articles:</strong> ${esc(o.produit || "")}</p>
+                        <p><strong>Total:</strong> ${Number(o.totalAmount || 0).toFixed(2)} DT (livraison ${Number(o.deliveryCost || 0).toFixed(2)} DT)</p>
+                        <p><strong>Note:</strong> ${esc(o.message || "—")}</p>
+                        ${o.customDetails ? `<p><strong>Sur-mesure:</strong> ${esc(JSON.stringify(o.customDetails))}</p>` : ""}
+                        <p><strong>Source:</strong> ${esc(o.source || "—")}</p>
+                    `;
+                    modal.classList.add("open");
+                });
+            });
+
+            wrap.querySelectorAll("[data-del]").forEach((btn) => {
+                btn.addEventListener("click", async () => {
+                    if (!confirm("Supprimer cette commande ?")) return;
+                    if (demo) removeOrder(btn.dataset.del);
+                    else await deleteDoc(doc(db, "orders", btn.dataset.del));
+                    await refresh();
+                });
+            });
+        }
+
+        function waLink(o) {
+            const phone = String(o.telephone || "").replace(/\D/g, "");
+            const target = phone.startsWith("216") ? phone : (phone.length === 8 ? "216" + phone : waPhone || phone);
+            const text = encodeURIComponent(`Salut ${o.nom}, concernant ta commande Brikity (${o.produit || ""}).`);
+            return `https://wa.me/${target}?text=${text}`;
+        }
+
+        function esc(s) {
+            return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+        }
+    </script>
+</body>
+</html>

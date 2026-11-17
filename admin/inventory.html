@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Produits | Brikity Admin</title>
+    <link rel="icon" type="image/png" href="../assets/logo-brikity.png" />
+    <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+    <div id="shell"></div>
+    <main class="main">
+        <div class="topbar">
+            <button type="button" class="mobile-menu-btn" id="mobile-menu-btn">☰</button>
+            <h1>Produits</h1>
+            <button type="button" class="btn btn-primary" id="btn-new">+ Ajouter</button>
+        </div>
+        <div class="content">
+            <div class="panel">
+                <div class="panel-header"><h2>Inventaire</h2></div>
+                <div id="table-wrap" class="empty">Chargement…</div>
+            </div>
+        </div>
+    </main>
+
+    <div class="modal-overlay" id="modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modal-title">Produit</h3>
+                <button type="button" class="btn btn-ghost" id="modal-close">✕</button>
+            </div>
+            <form class="modal-body" id="product-form">
+                <input type="hidden" id="product-id" />
+                <div class="form-group"><label>Nom</label><input class="form-control" id="name" required /></div>
+                <div class="form-group"><label>Description</label><textarea class="form-control" id="description" rows="3"></textarea></div>
+                <div class="form-row">
+                    <div class="form-group"><label>Prix (DT)</label><input class="form-control" id="price" type="number" step="0.01" required /></div>
+                    <div class="form-group"><label>Ancien prix</label><input class="form-control" id="oldPrice" type="number" step="0.01" /></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Catégorie (id)</label><input class="form-control" id="category" placeholder="drop" /></div>
+                    <div class="form-group"><label>Stock</label><input class="form-control" id="stock" type="number" value="50" /></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Badge</label>
+                        <select class="form-control" id="badge">
+                            <option value="">Aucun</option>
+                            <option value="bestseller">Best-seller</option>
+                            <option value="nouveau">Nouveau</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Actif</label>
+                        <select class="form-control" id="isActive">
+                            <option value="true">Oui</option>
+                            <option value="false">Non</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group"><label>Couleurs (hex, séparées par virgule)</label><input class="form-control" id="colors" placeholder="#0066FF,#FFD000" /></div>
+                <div class="form-group"><label>Image</label><input class="form-control" id="imageFile" type="file" accept="image/*" /></div>
+                <div class="form-group"><label>Ou URL image</label><input class="form-control" id="imageUrl" placeholder="https://... ou ../assets/..." /></div>
+                <img id="preview" alt="" style="max-width:120px;border-radius:8px;display:none;margin-bottom:0.5rem;" />
+                <div id="form-msg"></div>
+            </form>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-ghost" id="modal-cancel">Annuler</button>
+                <button type="submit" form="product-form" class="btn btn-primary" id="save-btn">Enregistrer</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import {
+            collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp
+        } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getStorage } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+        import { requireAdmin, renderAdminShell, bindAdminChrome } from "./require-admin.js";
+        import { uploadImage } from "./storage-upload.js";
+        import {
+            listProducts, upsertProduct, removeProduct, fileToDataUrl
+        } from "./local-db.js";
+
+        let db, storage, demo = false, editingId = null;
+
+        requireAdmin(async ({ auth, db: database, app, demo: isDemo }) => {
+            demo = isDemo;
+            db = database;
+            if (!demo) storage = getStorage(app);
+            document.getElementById("shell").innerHTML = renderAdminShell("inventory", { demo });
+            bindAdminChrome(auth);
+            await refresh();
+        });
+
+        const modal = document.getElementById("modal");
+        const openModal = () => modal.classList.add("open");
+        const closeModal = () => {
+            modal.classList.remove("open");
+            editingId = null;
+            document.getElementById("product-form").reset();
+            document.getElementById("preview").style.display = "none";
+        };
+
+        document.getElementById("btn-new").addEventListener("click", () => {
+            editingId = null;
+            document.getElementById("modal-title").textContent = "Nouveau produit";
+            document.getElementById("product-id").value = "";
+            openModal();
+        });
+        document.getElementById("modal-close").addEventListener("click", closeModal);
+        document.getElementById("modal-cancel").addEventListener("click", closeModal);
+
+        async function loadProducts() {
+            if (demo) return listProducts();
+            const snap = await getDocs(collection(db, "products"));
+            return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        }
+
+        async function refresh() {
+            const products = await loadProducts();
+            const wrap = document.getElementById("table-wrap");
+            if (!products.length) {
+                wrap.innerHTML = `<div class="empty">Aucun produit. Ajoute ton premier drop.</div>`;
+                return;
+            }
+            wrap.innerHTML = `
+            <table>
+                <thead><tr><th></th><th>Nom</th><th>Prix</th><th>Badge</th><th>Actif</th><th></th></tr></thead>
+                <tbody>
+                ${products.map((p) => `
+                    <tr>
+                        <td><img class="thumb" src="${p.imageUrl || "../assets/logo-brikity.png"}" alt="" /></td>
+                        <td><strong>${esc(p.name)}</strong><div style="color:var(--muted);font-size:.8rem">${esc(p.category || "")}</div></td>
+                        <td>${Number(p.price || 0)} DT</td>
+                        <td>${p.badge ? `<span class="badge badge-warn">${esc(p.badge)}</span>` : "—"}</td>
+                        <td>${p.isActive === false ? `<span class="badge badge-muted">Non</span>` : `<span class="badge badge-ok">Oui</span>`}</td>
+                        <td class="actions">
+                            <button type="button" class="btn btn-ghost" data-edit="${p.id}">Éditer</button>
+                            <button type="button" class="btn btn-danger" data-del="${p.id}">Suppr.</button>
+                        </td>
+                    </tr>
+                `).join("")}
+                </tbody>
+            </table>`;
+
+            wrap.querySelectorAll("[data-edit]").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const p = products.find((x) => x.id === btn.dataset.edit);
+                    if (!p) return;
+                    editingId = p.id;
+                    document.getElementById("modal-title").textContent = "Modifier produit";
+                    document.getElementById("product-id").value = p.id;
+                    document.getElementById("name").value = p.name || "";
+                    document.getElementById("description").value = p.description || "";
+                    document.getElementById("price").value = p.price ?? "";
+                    document.getElementById("oldPrice").value = p.oldPrice ?? "";
+                    document.getElementById("category").value = p.category || "";
+                    document.getElementById("stock").value = p.stock ?? 0;
+                    document.getElementById("badge").value = p.badge || "";
+                    document.getElementById("isActive").value = p.isActive === false ? "false" : "true";
+                    document.getElementById("colors").value = Array.isArray(p.colors) ? p.colors.join(",") : "";
+                    document.getElementById("imageUrl").value = p.imageUrl || "";
+                    const prev = document.getElementById("preview");
+                    if (p.imageUrl) { prev.src = p.imageUrl; prev.style.display = "block"; }
+                    openModal();
+                });
+            });
+
+            wrap.querySelectorAll("[data-del]").forEach((btn) => {
+                btn.addEventListener("click", async () => {
+                    if (!confirm("Supprimer ce produit ?")) return;
+                    if (demo) removeProduct(btn.dataset.del);
+                    else await deleteDoc(doc(db, "products", btn.dataset.del));
+                    await refresh();
+                });
+            });
+        }
+
+        document.getElementById("product-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById("save-btn");
+            const msg = document.getElementById("form-msg");
+            btn.disabled = true;
+            msg.innerHTML = "";
+            try {
+                let imageUrl = document.getElementById("imageUrl").value.trim();
+                let storagePath = null;
+                const file = document.getElementById("imageFile").files[0];
+                if (file) {
+                    if (demo) {
+                        imageUrl = await fileToDataUrl(file);
+                    } else {
+                        const up = await uploadImage(storage, file, "products");
+                        imageUrl = up.url;
+                        storagePath = up.path;
+                    }
+                }
+
+                const colors = document.getElementById("colors").value
+                    .split(",")
+                    .map((c) => c.trim())
+                    .filter(Boolean);
+
+                const payload = {
+                    name: document.getElementById("name").value.trim(),
+                    description: document.getElementById("description").value.trim(),
+                    price: Number(document.getElementById("price").value),
+                    oldPrice: document.getElementById("oldPrice").value ? Number(document.getElementById("oldPrice").value) : null,
+                    category: document.getElementById("category").value.trim(),
+                    stock: Number(document.getElementById("stock").value) || 0,
+                    badge: document.getElementById("badge").value || null,
+                    isActive: document.getElementById("isActive").value === "true",
+                    colors,
+                    imageUrl: imageUrl || "",
+                    images: []
+                };
+
+                if (demo) {
+                    upsertProduct(payload, editingId || null);
+                } else {
+                    const toSave = { ...payload, updatedAt: serverTimestamp() };
+                    if (storagePath) toSave.storagePath = storagePath;
+                    if (editingId) {
+                        await updateDoc(doc(db, "products", editingId), toSave);
+                    } else {
+                        await addDoc(collection(db, "products"), { ...toSave, createdAt: serverTimestamp() });
+                    }
+                }
+                closeModal();
+                await refresh();
+            } catch (err) {
+                msg.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        function esc(s) {
+            return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+        }
+    </script>
+</body>
+</html>
